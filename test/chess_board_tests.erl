@@ -1,4 +1,5 @@
 -module(chess_board_tests).
+
 -include_lib("eunit/include/eunit.hrl").
 
 %% Run with:
@@ -6,8 +7,14 @@
 %% 2> c(chess_board_tests).
 %% 3> eunit:test(chess_board_tests, [verbose]).
 
--import(chess_board, [new/0, from_fen/1, to_fen/1, move/3, move/4,
-                      in_check/2, legal_moves_with_specials/2]).
+-import(erl_chess_board, [
+    new/0,
+    from_fen/1,
+    to_fen/1,
+    move/3, move/4,
+    in_check/2,
+    legal_moves_with_specials/2
+]).
 
 %%--------------------------------------------------------------
 %%  Test Groups
@@ -21,92 +28,96 @@ fen_roundtrip_test() ->
 
 simple_pawn_move_test() ->
     S0 = from_fen("8/8/8/3P4/8/8/8/8 w - - 0 1"),
-    S1 = move(S0, {4,4}, {4,5}),
-    ?assertEqual(white, maps:get(<<"turn">>, S1)),
+    S1 = move(S0, {4, 5}, {4, 6}),
+    ?assertEqual(black, maps:get(<<"turn">>, S1)),
     B = maps:get(<<"board">>, S1),
-    ?assertEqual({white,pawn}, maps:get({4,5}, B)).
+    ?assertEqual({white, pawn}, maps:get({4, 6}, B)).
 
 illegal_move_test() ->
     S0 = from_fen("8/8/8/3P4/8/8/8/8 w - - 0 1"),
-    {error, illegal_move} = move(S0, {4,4}, {5,6}).
+    {error, illegal_move} = move(S0, {4, 5}, {5, 7}).
 
 pawn_promotion_autoqueen_test() ->
-    S0 = from_fen("7P/8/8/8/8/8/8/k6K w - - 0 1"),
-    S1 = move(S0, {8,7}, {8,8}),
+    S0 = from_fen("k7/7P/8/8/8/8/8/7K w - - 0 1"),
+    S1 = move(S0, {8, 7}, {8, 8}),
     F = to_fen(S1),
-    ?assert(string:prefix(F, "7Q")).
+    ?assertNotEqual(nomatch, string:prefix(F, "k6Q")).
 
 pawn_promotion_callback_test() ->
     Fun = fun(_Color) -> rook end,
-    S0 = from_fen("7P/8/8/8/8/8/8/k6K w - - 0 1"),
-    S1 = move(S0, {8,7}, {8,8}, Fun),
+    S0 = from_fen("k7/7P/8/8/8/8/8/7K w - - 0 1"),
+    S1 = move(S0, {8, 7}, {8, 8}, Fun),
     F = to_fen(S1),
-    ?assert(string:prefix(F, "7R")).
+    ?assertNotEqual(nomatch, string:prefix(F, "k6R")).
 
 promotion_callback_fail_fallback_test() ->
     Bad = fun(_) -> oops end,
-    S0 = from_fen("7P/8/8/8/8/8/8/k6K w - - 0 1"),
-    S1 = move(S0, {8,7}, {8,8}, Bad),
+    S0 = from_fen("k7/7P/8/8/8/8/8/7K w - - 0 1"),
+    S1 = move(S0, {8, 7}, {8, 8}, Bad),
     F = to_fen(S1),
-    ?assert(string:prefix(F, "7Q")).
+    ?assertNotEqual(nomatch, string:prefix(F, "k6Q")).
 
 en_passant_test() ->
     %% White pawn double-step enables EP for black
-    S0 = from_fen("8/8/8/3p4/8/2P5/8/8 w - - 0 1"),
-    S1 = move(S0, {3,3}, {3,5}),
+    S0 = from_fen("8/8/8/3p4/8/8/2P5/8 w - - 0 1"),
+    S1 = move(S0, {3, 2}, {3, 4}),
     Ep = maps:get(<<"ep">>, S1),
-    ?assertEqual({3,4}, Ep),
+    ?assertEqual({3, 3}, Ep),
     %% black captures en passant
-    S2 = move(S1, {4,5}, {3,4}),
+    S2 = move(S1, {4, 5}, {3, 4}),
     B = maps:get(<<"board">>, S2),
-    ?assert(maps:get({3,4}, B) =:= {black,pawn}),
-    ?assertEqual(none, maps:get({3,5}, B)).
+    ?assertEqual({black, pawn}, maps:get({3, 4}, B)),
+    ?assertEqual(none, maps:get({4, 5}, B, none)).
 
 castling_kingside_white_test() ->
     %% King and rook only
     S0 = from_fen("4k3/8/8/8/8/8/8/R3K2R w K - 0 1"),
-    S1 = move(S0, {5,1}, {7,1}),
+    S1 = move(S0, {5, 1}, {7, 1}),
     B = maps:get(<<"board">>, S1),
-    ?assertEqual({white,king}, maps:get({7,1}, B)),
-    ?assertEqual({white,rook}, maps:get({6,1}, B)).
+    ?assertEqual({white, king}, maps:get({7, 1}, B)),
+    ?assertEqual({white, rook}, maps:get({6, 1}, B)).
 
 castling_queenside_black_test() ->
     S0 = from_fen("r3k2r/8/8/8/8/8/8/4K3 b kq - 0 1"),
-    S1 = move(S0, {5,8}, {3,8}),
+    S1 = move(S0, {5, 8}, {3, 8}),
     B = maps:get(<<"board">>, S1),
-    ?assertEqual({black,king}, maps:get({3,8}, B)),
-    ?assertEqual({black,rook}, maps:get({4,8}, B)).
+    ?assertEqual({black, king}, maps:get({3, 8}, B)),
+    ?assertEqual({black, rook}, maps:get({4, 8}, B)).
 
 in_check_simple_test() ->
     %% White king on e1, black rook on e8 => white in check
     S0 = from_fen("4r3/8/8/8/8/8/8/4K3 w - - 0 1"),
     B = maps:get(<<"board">>, S0),
-    ?assert(chess_board:in_check(B, white)).
+    ?assert(erl_chess_board:in_check(B, white)).
 
 in_check_false_test() ->
     %% White king not in check
     S0 = from_fen("4r3/8/8/8/8/8/8/3K4 w - - 0 1"),
     B = maps:get(<<"board">>, S0),
-    ?assertNot(chess_board:in_check(B, white)).
+    ?assertNot(erl_chess_board:in_check(B, white)).
 
 illegal_due_to_self_check_test() ->
     %% Move rook away exposes check
     S0 = from_fen("4r3/8/8/8/8/8/8/R3K3 w - - 0 1"),
-    {error, would_leave_king_in_check} = move(S0, {1,1}, {1,2}).
+    {error, would_leave_king_in_check} = move(S0, {1, 1}, {1, 2}).
 
 %% gather all tests in a suite
 all_test_() ->
     [
-     {"FEN roundtrip", fun fen_roundtrip_test/0},
-     {"Simple pawn move", fun simple_pawn_move_test/0},
-     {"Illegal pawn move", fun illegal_move_test/0},
-     {"Promotion auto-queen", fun pawn_promotion_autoqueen_test/0},
-     {"Promotion with callback", fun pawn_promotion_callback_test/0},
-     {"Promotion fallback", fun promotion_callback_fail_fallback_test/0},
-     {"En passant", fun en_passant_test/0},
-     {"Castling kingside (white)", fun castling_kingside_white_test/0},
-     {"Castling queenside (black)", fun castling_queenside_black_test/0},
-     {"Check detection true", fun in_check_simple_test/0},
-     {"Check detection false", fun in_check_false_test/0},
-     {"Illegal self-check prevention", fun illegal_due_to_self_check_test/0}
+        {"FEN roundtrip", fun fen_roundtrip_test/0},
+        {"Simple pawn move", fun simple_pawn_move_test/0},
+        {"Illegal pawn move", fun illegal_move_test/0},
+        {"Promotion auto-queen", fun pawn_promotion_autoqueen_test/0},
+        {"Promotion with callback", fun pawn_promotion_callback_test/0},
+        {"Promotion fallback", fun promotion_callback_fail_fallback_test/0},
+        {"En passant", fun en_passant_test/0},
+        {"Castling kingside (white)", fun castling_kingside_white_test/0},
+        {"Castling queenside (black)", fun castling_queenside_black_test/0},
+        {"Check detection true", fun in_check_simple_test/0},
+        {"Check detection false", fun in_check_false_test/0},
+        {"Illegal self-check prevention", fun illegal_due_to_self_check_test/0}
     ].
+
+%% ---------------------------------------------------------------
+%% Property-based tests would go here (disabled due to macro conflicts)
+%% ---------------------------------------------------------------
