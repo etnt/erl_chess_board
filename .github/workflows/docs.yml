@@ -56,9 +56,14 @@ jobs:
       - name: Setup Pages
         id: pages
         uses: actions/configure-pages@v4
-        with:
-          enablement: true
         continue-on-error: true
+
+      - name: Check Pages setup
+        if: steps.pages.outcome == 'failure'
+        run: |
+          echo "::warning::GitHub Pages is not enabled for this repository."
+          echo "::warning::To enable it: Settings > Pages > Source: GitHub Actions"
+          echo "Documentation has been built but will not be deployed."
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
