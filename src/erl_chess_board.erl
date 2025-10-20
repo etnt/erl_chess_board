@@ -1,5 +1,31 @@
-%%% @doc Minimal chess board with move legality including check detection
-%%
+%%% @doc A minimal chess board implementation with move legality validation and check detection.
+%%%
+%%% This module provides a complete chess board implementation that can:
+%%% <ul>
+%%% <li>Parse and generate FEN (Forsyth-Edwards Notation) strings</li>
+%%% <li>Validate move legality according to chess rules</li>
+%%% <li>Handle special moves like castling, en passant, and pawn promotion</li>
+%%% <li>Detect check and prevent moves that would leave the king in check</li>
+%%% </ul>
+%%%
+%%% The chess board state is represented as a map with the following keys:
+%%% <ul>
+%%% <li>`<<"board">>': A map from {File, Rank} coordinates to {Color, Piece} tuples</li>
+%%% <li>`<<"turn">>': Current player's turn (`white' or `black')</li>
+%%% <li>`<<"castling">>': Castling rights for both colors</li>
+%%% <li>`<<"ep">>': En passant target square (or `none')</li>
+%%% <li>`<<"halfmove">>': Half-move clock for the 50-move rule</li>
+%%% <li>`<<"fullmove">>': Full-move number</li>
+%%% </ul>
+%%%
+%%% Coordinates are represented as `{File, Rank}' tuples where:
+%%% <ul>
+%%% <li>File is 1-8 (corresponding to a-h)</li>
+%%% <li>Rank is 1-8 (white's first rank is 1, black's first rank is 8)</li>
+%%% </ul>
+%%%
+%%% @author Torbjörn Törnkvist
+%%% @version 1.0.0
 -module(erl_chess_board).
 -export([
     new/0,
@@ -18,9 +44,45 @@
 %% Public API
 %% -------------------------
 
+%% @doc Creates a new chess board in the standard starting position.
+%%
+%% Example:
+%% ```
+%% 1> State = erl_chess_board:new().
+%% 2> erl_chess_board:to_fen(State).
+%% "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
+%% '''
+%%
+%% @returns A chess board state map representing the initial game position.
+%% @equiv from_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1")
+-spec new() -> map().
 new() ->
     from_fen(?START_FEN).
 
+%% @doc Creates a chess board state from a FEN (Forsyth-Edwards Notation) string.
+%%
+%% FEN is a standard notation for describing chess positions. It consists of six
+%% space-separated fields:
+%% <ol>
+%% <li>Piece placement (from white's perspective, rank 8 to rank 1)</li>
+%% <li>Active color ("w" for white, "b" for black)</li>
+%% <li>Castling availability (KQkq for kingside/queenside white/black)</li>
+%% <li>En passant target square in algebraic notation (or "-")</li>
+%% <li>Halfmove clock (moves since last capture or pawn move)</li>
+%% <li>Fullmove number (incremented after black's move)</li>
+%% </ol>
+%%
+%% Example:
+%% ```
+%% 1> erl_chess_board:from_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1").
+%% #{<<"board">> => #{{1,1} => {white,rook}, ...},
+%%   <<"turn">> => white, ...}
+%% '''
+%%
+%% @param Fen A valid FEN string
+%% @returns A chess board state map, or `error' if the FEN string is invalid
+%% @see to_fen/1
+-spec from_fen(string()) -> map() | error.
 from_fen(Fen) when is_list(Fen) ->
     Parts = string:tokens(Fen, " "),
     case Parts of
@@ -41,6 +103,15 @@ from_fen(Fen) when is_list(Fen) ->
             error
     end.
 
+%% @doc Converts a chess board state to FEN (Forsyth-Edwards Notation) string.
+%%
+%% This is the inverse operation of `from_fen/1'. The resulting FEN string can
+%% be used to recreate the exact same board position.
+%%
+%% @param State A chess board state map
+%% @returns A FEN string representation of the board state
+%% @see from_fen/1
+-spec to_fen(map()) -> string().
 to_fen(State) ->
     Board = maps:get(<<"board">>, State),
     BoardStr = serialize_board(Board),
@@ -55,10 +126,60 @@ to_fen(State) ->
     FullStr = integer_to_list(maps:get(<<"fullmove">>, State)),
     string:join([BoardStr, TurnStr, CastlingStr, EpStr, HalfStr, FullStr], " ").
 
+%% @doc Attempts to make a move on the chess board with automatic queen promotion.
+%%
+%% This is a convenience function that automatically promotes pawns to queens.
+%% For custom promotion behavior, use `move/4'.
+%%
+%% Example:
+%% ```
+%% 1> State = erl_chess_board:new().
+%% 2> State2 = erl_chess_board:move(State, {5,2}, {5,4}).  % e2-e4
+%% 3> erl_chess_board:move(State2, {5,7}, {5,5}).         % e7-e5
+%% '''
+%%
+%% @param State The current chess board state
+%% @param From Source square as `{File, Rank}' tuple (1-8 for both coordinates)
+%% @param To Target square as `{File, Rank}' tuple (1-8 for both coordinates)
+%% @returns New board state after the move, or `{error, Reason}' if move is invalid
+%% @see move/4
+-spec move(map(), {integer(), integer()}, {integer(), integer()}) ->
+    map() | {error, atom()}.
 move(State, From, To) ->
     %% Fallback wrapper that uses default auto-queen promotion
     move(State, From, To, fun(_Color) -> queen end).
 
+%% @doc Attempts to make a move on the chess board with custom promotion handling.
+%%
+%% This function validates the move according to chess rules, including:
+%% <ul>
+%% <li>Basic piece movement rules</li>
+%% <li>Turn validation (only the current player can move)</li>
+%% <li>Check prevention (moves that would leave own king in check are illegal)</li>
+%% <li>Special moves (castling, en passant, pawn promotion)</li>
+%% </ul>
+%%
+%% The promotion function is called when a pawn reaches the opposite end of the board.
+%% It should return one of: `queen', `rook', `bishop', `knight', or `pawn'.
+%% If the function fails or returns an invalid piece, `queen' is used as default.
+%%
+%% @param State The current chess board state
+%% @param From Source square as `{File, Rank}' tuple (1-8 for both coordinates)
+%% @param To Target square as `{File, Rank}' tuple (1-8 for both coordinates)
+%% @param PromoteFun Function called for pawn promotion: `fun(Color) -> PieceType'
+%% @returns New board state after the move, or one of:
+%%   <ul>
+%%   <li>`{error, no_piece}' - No piece at source square</li>
+%%   <li>`{error, not_your_turn}' - Wrong player attempting to move</li>
+%%   <li>`{error, illegal_move}' - Move not allowed by piece rules</li>
+%%   <li>`{error, would_leave_king_in_check}' - Move would expose own king to check</li>
+%%   </ul>
+-spec move(
+    map(),
+    {integer(), integer()},
+    {integer(), integer()},
+    fun((white | black) -> atom())
+) -> map() | {error, atom()}.
 move(State, From, To, PromoteFun) ->
     Board0 = maps:get(<<"board">>, State),
     case maps:find(From, Board0) of
@@ -120,6 +241,25 @@ move(State, From, To, PromoteFun) ->
 %% Legal-move generation (piece motion rules only)
 %% -------------------------
 
+%% @doc Gets all legal moves for a piece, including special moves.
+%%
+%% This function returns all legal moves for the piece at the given square,
+%% including special chess moves:
+%% <ul>
+%% <li>En passant captures (for pawns)</li>
+%% <li>Castling moves (for kings)</li>
+%% <li>Regular piece movement according to chess rules</li>
+%% </ul>
+%%
+%% Note: This function does not check if moves would leave the king in check.
+%% Use `move/3' or `move/4' for full move validation.
+%%
+%% @param State The current chess board state
+%% @param From Square to get moves for, as `{File, Rank}' tuple
+%% @returns List of legal target squares as `{File, Rank}' tuples
+%% @see legal_moves/2
+-spec legal_moves_with_specials(map(), {integer(), integer()}) ->
+    [{integer(), integer()}].
 legal_moves_with_specials(State, From) ->
     Board = maps:get(<<"board">>, State),
     case maps:get(From, Board, none) of
@@ -149,6 +289,17 @@ legal_moves_with_specials(State, From) ->
             Normal ++ EpMoves ++ Extra
     end.
 
+%% @doc Gets basic legal moves for a piece (excluding special moves).
+%%
+%% This function returns moves according to basic piece movement rules,
+%% but does not include special moves like castling or en passant.
+%% Use `legal_moves_with_specials/2' for complete move generation.
+%%
+%% @param Board The board state (just the piece positions)
+%% @param Square Position to get moves for, as `{File, Rank}' tuple
+%% @returns List of legal target squares as `{File, Rank}' tuples
+%% @see legal_moves_with_specials/2
+-spec legal_moves(map(), {integer(), integer()}) -> [{integer(), integer()}].
 legal_moves(Board, {F, R}) ->
     case maps:get({F, R}, Board, none) of
         none ->
@@ -183,9 +334,13 @@ legal_moves(Board, {F, R}) ->
             end
     end.
 
+%% @private
+%% @doc Checks if coordinates are within the chess board boundaries.
 inside({F, R}) ->
     F >= 1 andalso F =< 8 andalso R >= 1 andalso R =< 8.
 
+%% @private
+%% @doc Returns the color of the piece occupying a square, or `none' if empty.
 occupied_by(Board, {F, R}) ->
     case maps:get({F, R}, Board, none) of
         none -> none;
@@ -601,7 +756,16 @@ parse_castling(Str) ->
 %% Check detection & attack tests
 %% -------------------------
 
-%% in_check(Board, Color) -> true if Color's king is attacked on Board
+%% @doc Determines if a king is currently in check.
+%%
+%% A king is in check if it is attacked by any enemy piece. This function
+%% searches for the king of the specified color and checks if any enemy
+%% pieces can attack that square.
+%%
+%% @param Board The board state (piece positions only)
+%% @param Color The color of the king to check (`white' or `black')
+%% @returns `true' if the king is in check, `false' otherwise
+-spec in_check(map(), white | black) -> boolean().
 in_check(Board, Color) ->
     %% find king pos
     KingPos = find_king(Board, Color),
@@ -611,6 +775,8 @@ in_check(Board, Color) ->
         Pos -> is_attacked(Board, Pos, other(Color))
     end.
 
+%% @private
+%% @doc Finds the position of the king for the specified color.
 find_king(Board, Color) ->
     Fun = fun(Key, Value, Acc) ->
         case Value of
@@ -817,5 +983,7 @@ parse_ep(Chars) when is_list(Chars) ->
 %% Utilities
 %% -------------------------
 
+%% @private
+%% @doc Returns the opposite color.
 other(white) -> black;
 other(black) -> white.
