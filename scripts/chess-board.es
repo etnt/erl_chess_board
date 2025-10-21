@@ -21,15 +21,23 @@
 %%--------------------------------------------------------------------
 %% Entry Point
 %%--------------------------------------------------------------------
-main(_Args) ->
+main(Args) ->
     ok = shell:start_interactive({noshell, raw}),
 
     io:put_chars(?ALT_SCREEN_ON),
     io:put_chars(?HIDE_CURSOR),
     io:put_chars(?CLEAR_SCREEN),
 
-    %% Initial chess board setup
-    Board = initial_board(),
+    %% Get FEN string from args or use initial position
+    FEN =
+        case Args of
+            [FenString | _] -> FenString;
+            %% Initial position
+            [] -> "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR"
+        end,
+
+    %% Parse FEN and create board
+    Board = fen_to_board(FEN),
     draw_board(Board),
 
     %% Wait for 'q' to quit
@@ -40,7 +48,57 @@ main(_Args) ->
     ok.
 
 %%--------------------------------------------------------------------
-%% Initial Board Setup
+%% Parse FEN string to board
+%% FEN format: pieces are described rank by rank from 8 to 1
+%% Example: "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR"
+%%--------------------------------------------------------------------
+fen_to_board(FEN) ->
+    %% Split FEN by '/' to get ranks (rows)
+    Ranks = string:split(FEN, "/", all),
+
+    %% Process each rank, starting from rank 8 (top) down to rank 1
+    lists:foldl(
+        fun({Rank, RankStr}, Board) ->
+            parse_rank(RankStr, Rank, 1, Board)
+        end,
+        #{},
+        lists:zip(lists:seq(8, 1, -1), Ranks)
+    ).
+
+%%--------------------------------------------------------------------
+%% Parse a single rank (row) of the FEN string
+%%--------------------------------------------------------------------
+parse_rank([], _Row, _Col, Board) ->
+    Board;
+parse_rank([Char | Rest], Row, Col, Board) when Char >= $1, Char =< $8 ->
+    %% Number means empty squares
+    EmptySquares = Char - $0,
+    parse_rank(Rest, Row, Col + EmptySquares, Board);
+parse_rank([Char | Rest], Row, Col, Board) ->
+    %% Letter means a piece
+    {Color, PieceType} = char_to_piece(Char),
+    NewBoard = Board#{{Row, Col} => {Color, PieceType}},
+    parse_rank(Rest, Row, Col + 1, NewBoard).
+
+%%--------------------------------------------------------------------
+%% Convert FEN character to piece
+%% Uppercase = white, lowercase = black
+%%--------------------------------------------------------------------
+char_to_piece($R) -> {white, "r"};
+char_to_piece($N) -> {white, "n"};
+char_to_piece($B) -> {white, "b"};
+char_to_piece($Q) -> {white, "q"};
+char_to_piece($K) -> {white, "k"};
+char_to_piece($P) -> {white, "p"};
+char_to_piece($r) -> {black, "r"};
+char_to_piece($n) -> {black, "n"};
+char_to_piece($b) -> {black, "b"};
+char_to_piece($q) -> {black, "q"};
+char_to_piece($k) -> {black, "k"};
+char_to_piece($p) -> {black, "p"}.
+
+%%--------------------------------------------------------------------
+%% Initial Board Setup (kept for reference, now using FEN)
 %% Board is represented as a map with keys {Row, Col} where Row is 1-8, Col is 1-8
 %% Pieces are represented as {Color, Piece} where Color is white|black
 %%--------------------------------------------------------------------
@@ -127,19 +185,6 @@ draw_chess_row(Board, Row) ->
     io:put_chars(" " ++ integer_to_list(Row)),
     io:put_chars("\r\n").
 
-%%--------------------------------------------------------------------
-%% Draw padding for a square (empty line with just background color)
-%%--------------------------------------------------------------------
-draw_square_padding(Row, Col) ->
-    IsLight = (Row + Col) rem 2 =:= 0,
-    Colored =
-        case IsLight of
-            true ->
-                "\e[48;5;223m   \e[0m";
-            false ->
-                "\e[48;5;94m   \e[0m"
-        end,
-    io:put_chars(Colored).
 
 %%--------------------------------------------------------------------
 %% Draw a single square
