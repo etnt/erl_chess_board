@@ -13,7 +13,10 @@
     to_fen/1,
     move/3, move/4,
     in_check/2,
-    legal_moves_with_specials/2
+    legal_moves_with_specials/2,
+    is_checkmate/1,
+    is_stalemate/1,
+    is_game_over/1
 ]).
 
 %%--------------------------------------------------------------
@@ -101,6 +104,91 @@ illegal_due_to_self_check_test() ->
     S0 = from_fen("4r3/8/8/8/8/8/8/R3K3 w - - 0 1"),
     {error, would_leave_king_in_check} = move(S0, {1, 1}, {1, 2}).
 
+%% Checkmate detection tests
+checkmate_fools_mate_test() ->
+    %% Classic fool's mate position
+    S0 = from_fen(
+        "rnb1kbnr/pppp1ppp/8/4p3/6Pq/5P2/PPPPP2P/RNBQKBNR w KQkq - 1 3"
+    ),
+    ?assert(is_checkmate(S0)),
+    ?assertEqual({checkmate, black}, is_game_over(S0)).
+
+checkmate_back_rank_test() ->
+    %% Back rank mate - rook on e1, white king trapped on g1
+    S0 = from_fen("6k1/8/8/8/8/8/5PPP/4r1K1 w - - 0 1"),
+    ?assert(is_checkmate(S0)),
+    ?assertEqual({checkmate, black}, is_game_over(S0)).
+
+checkmate_scholars_mate_test() ->
+    %% Scholar's mate position
+    S0 = from_fen(
+        "r1bqkb1r/pppp1Qpp/2n2n2/4p3/2B1P3/8/PPPP1PPP/RNB1K1NR b KQkq - 0 4"
+    ),
+    ?assert(is_checkmate(S0)),
+    ?assertEqual({checkmate, white}, is_game_over(S0)).
+
+checkmate_from_user_example_test() ->
+    %% The checkmate position from the user's example
+    S0 = from_fen(
+        "rnQ1kb1r/ppp1pp2/5n1p/3N2p1/8/8/PPPP1PPP/R1B1KBNR b KQkq - 11 6"
+    ),
+    ?assert(is_checkmate(S0)),
+    ?assertEqual({checkmate, white}, is_game_over(S0)).
+
+not_checkmate_in_check_can_escape_test() ->
+    %% King in check but can move
+    S0 = from_fen("4r3/8/8/8/8/8/8/4K3 w - - 0 1"),
+    ?assertNot(is_checkmate(S0)),
+    ?assertEqual(ongoing, is_game_over(S0)).
+
+not_checkmate_can_block_test() ->
+    %% King in check but can be blocked
+    S0 = from_fen("4r3/8/8/8/8/4B3/8/4K3 w - - 0 1"),
+    ?assertNot(is_checkmate(S0)),
+    ?assertEqual(ongoing, is_game_over(S0)).
+
+not_checkmate_can_capture_test() ->
+    %% King in check but can capture attacking piece
+    S0 = from_fen("8/8/8/8/8/8/4r3/4K3 w - - 0 1"),
+    ?assertNot(is_checkmate(S0)),
+    ?assertEqual(ongoing, is_game_over(S0)).
+
+%% Stalemate detection tests
+stalemate_king_only_test() ->
+    %% Classic stalemate - queen on c7, white king on c6, black king on a8
+    S0 = from_fen("k7/2Q5/2K5/8/8/8/8/8 b - - 0 1"),
+    ?assert(is_stalemate(S0)),
+    ?assertEqual(stalemate, is_game_over(S0)).
+
+stalemate_pawn_blocked_test() ->
+    %% King and pawn, both blocked
+    S0 = from_fen("k7/P7/K7/8/8/8/8/8 b - - 0 1"),
+    ?assert(is_stalemate(S0)),
+    ?assertEqual(stalemate, is_game_over(S0)).
+
+not_stalemate_has_moves_test() ->
+    %% Similar position but black has legal moves
+    S0 = from_fen("k7/8/1K6/8/8/8/8/8 b - - 0 1"),
+    ?assertNot(is_stalemate(S0)),
+    ?assertEqual(ongoing, is_game_over(S0)).
+
+%% Game status ongoing tests
+game_ongoing_opening_test() ->
+    %% Normal opening position
+    S0 = new(),
+    ?assertEqual(ongoing, is_game_over(S0)),
+    ?assertNot(is_checkmate(S0)),
+    ?assertNot(is_stalemate(S0)).
+
+game_ongoing_middlegame_test() ->
+    %% Random middlegame position
+    S0 = from_fen(
+        "r1bqkb1r/pppp1ppp/2n2n2/4p3/2B1P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 4 4"
+    ),
+    ?assertEqual(ongoing, is_game_over(S0)),
+    ?assertNot(is_checkmate(S0)),
+    ?assertNot(is_stalemate(S0)).
+
 %% gather all tests in a suite
 all_test_() ->
     [
@@ -115,7 +203,23 @@ all_test_() ->
         {"Castling queenside (black)", fun castling_queenside_black_test/0},
         {"Check detection true", fun in_check_simple_test/0},
         {"Check detection false", fun in_check_false_test/0},
-        {"Illegal self-check prevention", fun illegal_due_to_self_check_test/0}
+        {"Illegal self-check prevention", fun illegal_due_to_self_check_test/0},
+        %% Checkmate tests
+        {"Checkmate: Fool's mate", fun checkmate_fools_mate_test/0},
+        {"Checkmate: Back rank mate", fun checkmate_back_rank_test/0},
+        {"Checkmate: Scholar's mate", fun checkmate_scholars_mate_test/0},
+        {"Checkmate: User example", fun checkmate_from_user_example_test/0},
+        {"Not checkmate: Can escape",
+            fun not_checkmate_in_check_can_escape_test/0},
+        {"Not checkmate: Can block", fun not_checkmate_can_block_test/0},
+        {"Not checkmate: Can capture", fun not_checkmate_can_capture_test/0},
+        %% Stalemate tests
+        {"Stalemate: King only", fun stalemate_king_only_test/0},
+        {"Stalemate: Pawn blocked", fun stalemate_pawn_blocked_test/0},
+        {"Not stalemate: Has moves", fun not_stalemate_has_moves_test/0},
+        %% Game status tests
+        {"Game ongoing: Opening", fun game_ongoing_opening_test/0},
+        {"Game ongoing: Middlegame", fun game_ongoing_middlegame_test/0}
     ].
 
 %% ---------------------------------------------------------------
