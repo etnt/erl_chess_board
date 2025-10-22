@@ -6,6 +6,7 @@
 %%% <li>Validate move legality according to chess rules</li>
 %%% <li>Handle special moves like castling, en passant, and pawn promotion</li>
 %%% <li>Detect check and prevent moves that would leave the king in check</li>
+%%% <li>Detect checkmate and stalemate conditions</li>
 %%% </ul>
 %%%
 %%% The chess board state is represented as a map with the following keys:
@@ -24,6 +25,27 @@
 %%% <li>Rank is 1-8 (white's first rank is 1, black's first rank is 8)</li>
 %%% </ul>
 %%%
+%%% == Game Status Detection ==
+%%%
+%%% The module provides functions to detect game-ending conditions:
+%%% <ul>
+%%% <li>`is_checkmate/1' - Detects if the current player is checkmated</li>
+%%% <li>`is_stalemate/1' - Detects if the position is a stalemate (draw)</li>
+%%% <li>`is_game_over/1' - Comprehensive game status check</li>
+%%% </ul>
+%%%
+%%% Example usage:
+%%% ```
+%%% 1> State = erl_chess_board:new().
+%%% 2> State2 = erl_chess_board:move(State, "e4").
+%%% 3> State3 = erl_chess_board:move(State2, "e5").
+%%% 4> case erl_chess_board:is_game_over(State3) of
+%%%        {checkmate, Winner} -> io:format("Checkmate! ~p wins~n", [Winner]);
+%%%        stalemate -> io:format("Stalemate - draw~n");
+%%%        ongoing -> io:format("Game continues~n")
+%%%    end.
+%%% '''
+%%%
 %%% @author Torbjörn Törnkvist
 %%% @version 1.0.0
 -module(erl_chess_board).
@@ -31,11 +53,15 @@
     new/0,
     from_fen/1,
     to_fen/1,
+    move/2,
     move/3,
     move/4,
     legal_moves/2,
     legal_moves_with_specials/2,
-    in_check/2
+    in_check/2,
+    is_checkmate/1,
+    is_stalemate/1,
+    is_game_over/1
 ]).
 
 -define(START_FEN, "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1").
@@ -125,6 +151,37 @@ to_fen(State) ->
     HalfStr = integer_to_list(maps:get(<<"halfmove">>, State)),
     FullStr = integer_to_list(maps:get(<<"fullmove">>, State)),
     string:join([BoardStr, TurnStr, CastlingStr, EpStr, HalfStr, FullStr], " ").
+
+%% @doc Attempts to make a move on the chess board using algebraic notation.
+%%
+%% This is a convenience function that accepts a move in algebraic notation
+%% (e.g., "e4", "Nf3", "Rxe5") and applies it to the board. It automatically
+%% promotes pawns to queens. For custom promotion behavior, use `move/4'.
+%%
+%% Example:
+%% ```
+%% 1> State = erl_chess_board:new().
+%% 2> State2 = erl_chess_board:move(State, "e4").
+%% 3> erl_chess_board:move(State2, "e5").
+%% '''
+%%
+%% @param State The current chess board state
+%% @param MoveString The move in algebraic notation
+%% @returns New board state after the move, or `{error, Reason}' if move is invalid
+%% @see move/3
+-spec move(map(), string()) -> map() | {error, atom()}.
+move(State, MoveString) ->
+    case parse_move(MoveString) of
+        {ok, {Piece, To, FromFile, FromRank}} ->
+            case find_piece_to_move(State, Piece, To, {FromFile, FromRank}) of
+                {ok, From} ->
+                    move(State, From, To);
+                {error, Reason} ->
+                    {error, Reason}
+            end;
+        {error, Reason} ->
+            {error, Reason}
+    end.
 
 %% @doc Attempts to make a move on the chess board with automatic queen promotion.
 %%
@@ -775,6 +832,102 @@ in_check(Board, Color) ->
         Pos -> is_attacked(Board, Pos, other(Color))
     end.
 
+%% @doc Determines if the current position is checkmate.
+%%
+%% Checkmate occurs when the king is in check and the player has no legal
+%% moves to escape check. This function checks both conditions.
+%%
+%% Example:
+%% ```
+%% 1> State = erl_chess_board:from_fen("rnQ1kb1r/ppp1pp2/5n1p/3N2p1/8/8/PPPP1PPP/R1B1KBNR b KQkq - 11 6").
+%% 2> erl_chess_board:is_checkmate(State).
+%% true
+%% '''
+%%
+%% @param State The current chess board state
+%% @returns `true' if the current player is checkmated, `false' otherwise
+-spec is_checkmate(map()) -> boolean().
+is_checkmate(State) ->
+    Board = maps:get(<<"board">>, State),
+    Turn = maps:get(<<"turn">>, State),
+    in_check(Board, Turn) andalso not has_any_legal_move(State).
+
+%% @doc Determines if the current position is stalemate.
+%%
+%% Stalemate occurs when the player is not in check but has no legal moves.
+%% This results in a draw.
+%%
+%% Example:
+%% ```
+%% 1> State = erl_chess_board:from_fen("k7/8/1K6/8/8/8/8/7Q w - - 0 1").
+%% 2> erl_chess_board:is_stalemate(State).
+%% true
+%% '''
+%%
+%% @param State The current chess board state
+%% @returns `true' if the current player is stalemated, `false' otherwise
+-spec is_stalemate(map()) -> boolean().
+is_stalemate(State) ->
+    Board = maps:get(<<"board">>, State),
+    Turn = maps:get(<<"turn">>, State),
+    (not in_check(Board, Turn)) andalso not has_any_legal_move(State).
+
+%% @doc Determines if the game is over (checkmate or stalemate).
+%%
+%% This is a convenience function that combines checkmate and stalemate detection.
+%%
+%% @param State The current chess board state
+%% @returns `{checkmate, Winner}' where Winner is `white' or `black',
+%%          `stalemate' for a draw, or `ongoing' if the game continues
+-spec is_game_over(map()) -> {checkmate, white | black} | stalemate | ongoing.
+is_game_over(State) ->
+    case is_checkmate(State) of
+        true ->
+            Turn = maps:get(<<"turn">>, State),
+            {checkmate, other(Turn)};
+        false ->
+            case is_stalemate(State) of
+                true -> stalemate;
+                false -> ongoing
+            end
+    end.
+
+%% @private
+%% @doc Checks if the current player has any legal move available.
+has_any_legal_move(State) ->
+    Board = maps:get(<<"board">>, State),
+    Turn = maps:get(<<"turn">>, State),
+
+    %% Get all pieces of the current player
+    AllSquares = [{F, R} || F <- lists:seq(1, 8), R <- lists:seq(1, 8)],
+    OwnPieces = lists:filter(
+        fun(Pos) ->
+            case maps:get(Pos, Board, none) of
+                {Color, _} when Color =:= Turn -> true;
+                _ -> false
+            end
+        end,
+        AllSquares
+    ),
+
+    %% Check if any piece has a legal move
+    lists:any(
+        fun(From) ->
+            PossibleMoves = legal_moves_with_specials(State, From),
+            %% Try each possible move and see if it's actually legal (doesn't leave king in check)
+            lists:any(
+                fun(To) ->
+                    case move(State, From, To) of
+                        {error, _} -> false;
+                        _NewState -> true
+                    end
+                end,
+                PossibleMoves
+            )
+        end,
+        OwnPieces
+    ).
+
 %% @private
 %% @doc Finds the position of the king for the specified color.
 find_king(Board, Color) ->
@@ -987,3 +1140,67 @@ parse_ep(Chars) when is_list(Chars) ->
 %% @doc Returns the opposite color.
 other(white) -> black;
 other(black) -> white.
+
+%% @private
+%% @doc Parses a move in algebraic notation.
+parse_move(MoveString) ->
+    Re = "^([NBRQK])?([a-h])?([1-8])?x?([a-h][1-8])(=[NBRQ])?",
+    case re:run(MoveString, Re, [{capture, all_but_first, list}]) of
+        {match, [PieceStr, FromFileStr, FromRankStr, ToStr, _PromotionStr]} ->
+            To = parse_ep(ToStr),
+            FromFile =
+                case FromFileStr of
+                    [] -> undefined;
+                    [FileChar] -> FileChar - $a + 1
+                end,
+            FromRank =
+                case FromRankStr of
+                    [] -> undefined;
+                    [RankChar] -> RankChar - $0
+                end,
+            Piece =
+                case PieceStr of
+                    [] -> pawn;
+                    [PieceChar] -> get_piece_kind(PieceChar)
+                end,
+            {ok, {Piece, To, FromFile, FromRank}};
+        nomatch ->
+            {error, invalid_move_string}
+    end.
+
+%% @private
+%% @doc Finds the piece to move based on the parsed algebraic notation.
+find_piece_to_move(State, Piece, To, {FromFile, FromRank}) ->
+    Board = maps:get(<<"board">>, State),
+    Turn = maps:get(<<"turn">>, State),
+    Candidates =
+        maps:filter(
+            fun
+                ({F, R}, {C, P}) ->
+                    C =:= Turn andalso P =:= Piece andalso
+                        (FromFile =:= undefined orelse F =:= FromFile) andalso
+                        (FromRank =:= undefined orelse R =:= FromRank);
+                (_, _) ->
+                    false
+            end,
+            Board
+        ),
+    case maps:to_list(Candidates) of
+        [] ->
+            {error, no_such_piece};
+        [{From, _} | _] ->
+            case lists:member(To, legal_moves_with_specials(State, From)) of
+                true -> {ok, From};
+                false -> {error, illegal_move}
+            end;
+        _ ->
+            {error, ambiguous_move}
+    end.
+
+%% @private
+%% @doc Gets the piece kind from a character.
+get_piece_kind($N) -> knight;
+get_piece_kind($B) -> bishop;
+get_piece_kind($R) -> rook;
+get_piece_kind($Q) -> queen;
+get_piece_kind($K) -> king.

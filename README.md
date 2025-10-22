@@ -8,7 +8,40 @@ A minimal chess board library for Erlang with move legality validation and check
 - Validate move legality according to chess rules
 - Handle special moves like castling, en passant, and pawn promotion  
 - Detect check and prevent moves that would leave the king in check
-- Comprehensive test suite with 24 test cases
+- Detect checkmate and stalemate conditions
+- Interactive terminal chess game with algebraic notation support
+- Comprehensive test suite with 48 test cases
+
+## Interactive Chess Game
+
+An example interactive chess game is included in `scripts/chess-board.es`. It provides:
+
+- Visual board display with Unicode chess pieces and colored squares
+- Move input in standard algebraic notation (e.g., `e4`, `Nf3`, `exd5`)
+- Full move validation and legal move checking
+- Checkmate and stalemate detection
+- Check indication
+- FEN string display for position recreation
+- Alternate screen mode (preserves terminal content)
+
+### Playing the Game
+
+Start a new game from the initial position:
+```bash
+./scripts/chess-board.es
+```
+
+Start from a specific FEN position:
+```bash
+./scripts/chess-board.es "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1"
+```
+
+The game accepts standard algebraic notation including:
+- Pawn moves: `e4`, `d5`, `a3`
+- Piece moves: `Nf3`, `Bb5`, `Qd4`
+- Captures: `exd5`, `Nxe5`, `Qxf7`
+- Castling: `O-O` (kingside), `O-O-O` (queenside)
+- Disambiguation: `Nbd7` (knight from b-file), `R1e2` (rook from rank 1)
 
 ## Documentation
 
