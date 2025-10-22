@@ -55,12 +55,12 @@ rebar3 ex_doc
 
 ## Build
 ```bash
-    $ rebar3 compile
+rebar3 compile
 ```
 
 ## Test
 ```bash
-    $ rebar3 eunit
+rebar3 eunit
 ```
 
 ## Usage
