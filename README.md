@@ -14,7 +14,11 @@ A minimal chess board library for Erlang with move legality validation and check
 
 ## Interactive Chess Game
 
-An example interactive chess game is included in `scripts/chess-board.es`. It provides:
+An example interactive chess game is included in `scripts/chess-board.es`.
+
+See this [short video](https://youtu.be/nStyfxFRVcE?si=pbkPat283zMKnDjI) .
+
+It provides:
 
 - Visual board display with Unicode chess pieces and colored squares
 - Move input in standard algebraic notation (e.g., `e4`, `Nf3`, `exd5`)
