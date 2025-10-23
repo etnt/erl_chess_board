@@ -12,8 +12,6 @@
     from_fen/1,
     to_fen/1,
     move/3, move/4,
-    in_check/2,
-    legal_moves_with_specials/2,
     is_checkmate/1,
     is_stalemate/1,
     is_game_over/1
