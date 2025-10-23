@@ -250,7 +250,7 @@ move(State, From, To, PromoteFun) ->
                         false ->
                             {error, illegal_move};
                         true ->
-                            {SimBoard, SimState_after_move} =
+                            {SimBoard, SimStateAfterMove} =
                                 simulate_apply_move(
                                     State, From, To, Piece, PromoteFun
                                 ),
@@ -259,7 +259,7 @@ move(State, From, To, PromoteFun) ->
                                     {error, would_leave_king_in_check};
                                 false ->
                                     State1 = update_castling_rights(
-                                        SimState_after_move, From, To
+                                        SimStateAfterMove, From
                                     ),
                                     State2 = maps:put(
                                         <<"board">>, SimBoard, State1
@@ -749,7 +749,7 @@ update_ep(State, {Fx, Fy}, {_Tx, Ty}, {Color, Kind}) ->
 %% Castling rights updates
 %% -------------------------
 
-update_castling_rights(State, From, _To) ->
+update_castling_rights(State, From) ->
     Board = maps:get(<<"board">>, State),
     Castling = maps:get(<<"castling">>, State),
     NewCastling =
@@ -1192,9 +1192,7 @@ find_piece_to_move(State, Piece, To, {FromFile, FromRank}) ->
             case lists:member(To, legal_moves_with_specials(State, From)) of
                 true -> {ok, From};
                 false -> {error, illegal_move}
-            end;
-        _ ->
-            {error, ambiguous_move}
+            end
     end.
 
 %% @private
