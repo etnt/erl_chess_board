@@ -11,12 +11,12 @@
 %%%
 %%% The chess board state is represented as a map with the following keys:
 %%% <ul>
-%%% <li>`<<"board">>': A map from {File, Rank} coordinates to {Color, Piece} tuples</li>
-%%% <li>`<<"turn">>': Current player's turn (`white' or `black')</li>
-%%% <li>`<<"castling">>': Castling rights for both colors</li>
-%%% <li>`<<"ep">>': En passant target square (or `none')</li>
-%%% <li>`<<"halfmove">>': Half-move clock for the 50-move rule</li>
-%%% <li>`<<"fullmove">>': Full-move number</li>
+%%% <li>`board': A map from {File, Rank} coordinates to {Color, Piece} tuples</li>
+%%% <li>`turn': Current player's turn (`white' or `black')</li>
+%%% <li>`castling': Castling rights for both colors</li>
+%%% <li>`ep': En passant target square (or `none')</li>
+%%% <li>`halfmove': Half-move clock for the 50-move rule</li>
+%%% <li>`fullmove': Full-move number</li>
 %%% </ul>
 %%%
 %%% Coordinates are represented as `{File, Rank}' tuples where:
@@ -61,10 +61,44 @@
     in_check/2,
     is_checkmate/1,
     is_stalemate/1,
-    is_game_over/1
+    is_game_over/1,
+    board/1,
+    turn/1,
+    ep/1
 ]).
 
 -define(START_FEN, "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1").
+
+-nominal fen() :: string().
+-nominal move() :: string().
+-nominal cell() :: {1..8, 1..8}.
+-nominal color() :: white | black.
+-nominal piece() :: pawn | rook | bishop | knight | queen | king.
+-nominal move_error() :: {error, not_your_turn | would_leave_king_in_check | illegal_move | no_piece}.
+-nominal parse_error() :: {error, invalid_move_string}.
+-nominal board() :: #{cell() => {color(), piece()}}.
+-nominal castling() :: #{kingside := boolean(), queenside := boolean()}.
+-opaque t() :: #{
+    board := board(),
+    turn := color(),
+    castling := #{color() := castling()},
+    ep := cell(),
+    halfmove := 1..8,
+    fullmove := 1..8
+}.
+-export_type([t/0, board/0, castling/0, fen/0, move/0, cell/0, color/0, piece/0, move_error/0, parse_error/0]).
+
+%% -------------------------
+%% Getters
+%% -------------------------
+-spec board(t()) -> board().
+board(#{board := Board}) -> Board.
+
+-spec turn(t()) -> color().
+turn(#{turn := Turn}) -> Turn.
+
+-spec ep(t()) -> cell().
+ep(#{ep := EP}) -> EP.
 
 %% -------------------------
 %% Public API
@@ -81,7 +115,7 @@
 %%
 %% @returns A chess board state map representing the initial game position.
 %% @equiv from_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1")
--spec new() -> map().
+-spec new() -> t().
 new() ->
     from_fen(?START_FEN).
 
@@ -101,29 +135,29 @@ new() ->
 %% Example:
 %% ```
 %% 1> erl_chess_board:from_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1").
-%% #{<<"board">> => #{{1,1} => {white,rook}, ...},
-%%   <<"turn">> => white, ...}
+%% #{board => #{{1,1} => {white,rook}, ...},
+%%   turn => white, ...}
 %% '''
 %%
 %% @param Fen A valid FEN string
 %% @returns A chess board state map, or `error' if the FEN string is invalid
 %% @see to_fen/1
--spec from_fen(string()) -> map() | error.
+-spec from_fen(fen()) -> t() | error.
 from_fen(Fen) when is_list(Fen) ->
     Parts = string:tokens(Fen, " "),
     case Parts of
         [BoardStr, TurnStr, CastlingStr, EpStr, HalfStr, FullStr] ->
             #{
-                <<"board">> => parse_board(BoardStr),
-                <<"turn">> =>
+                board => parse_board(BoardStr),
+                turn =>
                     case TurnStr of
                         "w" -> white;
                         "b" -> black
                     end,
-                <<"castling">> => parse_castling(CastlingStr),
-                <<"ep">> => parse_ep(EpStr),
-                <<"halfmove">> => list_to_integer(HalfStr),
-                <<"fullmove">> => list_to_integer(FullStr)
+                castling => parse_castling(CastlingStr),
+                ep => parse_ep(EpStr),
+                halfmove => list_to_integer(HalfStr),
+                fullmove => list_to_integer(FullStr)
             };
         _ ->
             error
@@ -137,19 +171,19 @@ from_fen(Fen) when is_list(Fen) ->
 %% @param State A chess board state map
 %% @returns A FEN string representation of the board state
 %% @see from_fen/1
--spec to_fen(map()) -> string().
+-spec to_fen(t()) -> fen().
 to_fen(State) ->
-    Board = maps:get(<<"board">>, State),
+    Board = maps:get(board, State),
     BoardStr = serialize_board(Board),
     TurnStr =
-        case maps:get(<<"turn">>, State) of
+        case maps:get(turn, State) of
             white -> "w";
             black -> "b"
         end,
-    CastlingStr = serialize_castling(maps:get(<<"castling">>, State)),
-    EpStr = serialize_ep(maps:get(<<"ep">>, State)),
-    HalfStr = integer_to_list(maps:get(<<"halfmove">>, State)),
-    FullStr = integer_to_list(maps:get(<<"fullmove">>, State)),
+    CastlingStr = serialize_castling(maps:get(castling, State)),
+    EpStr = serialize_ep(maps:get(ep, State)),
+    HalfStr = integer_to_list(maps:get(halfmove, State)),
+    FullStr = integer_to_list(maps:get(fullmove, State)),
     string:join([BoardStr, TurnStr, CastlingStr, EpStr, HalfStr, FullStr], " ").
 
 %% @doc Attempts to make a move on the chess board using algebraic notation.
@@ -169,7 +203,7 @@ to_fen(State) ->
 %% @param MoveString The move in algebraic notation
 %% @returns New board state after the move, or `{error, Reason}' if move is invalid
 %% @see move/3
--spec move(map(), string()) -> map() | {error, atom()}.
+-spec move(t(), move()) -> t() | parse_error() | move_error().
 move(State, MoveString) ->
     case parse_move(MoveString) of
         {ok, {Piece, To, FromFile, FromRank}} ->
@@ -200,8 +234,7 @@ move(State, MoveString) ->
 %% @param To Target square as `{File, Rank}' tuple (1-8 for both coordinates)
 %% @returns New board state after the move, or `{error, Reason}' if move is invalid
 %% @see move/4
--spec move(map(), {integer(), integer()}, {integer(), integer()}) ->
-    map() | {error, atom()}.
+-spec move(t(), cell(), cell()) -> t() | move_error().
 move(State, From, To) ->
     %% Fallback wrapper that uses default auto-queen promotion
     move(State, From, To, fun(_Color) -> queen end).
@@ -231,19 +264,14 @@ move(State, From, To) ->
 %%   <li>`{error, illegal_move}' - Move not allowed by piece rules</li>
 %%   <li>`{error, would_leave_king_in_check}' - Move would expose own king to check</li>
 %%   </ul>
--spec move(
-    map(),
-    {integer(), integer()},
-    {integer(), integer()},
-    fun((white | black) -> atom())
-) -> map() | {error, atom()}.
+-spec move(t(), cell(), cell(), fun((color()) -> piece())) -> t() | move_error().
 move(State, From, To, PromoteFun) ->
-    Board0 = maps:get(<<"board">>, State),
+    Board0 = maps:get(board, State),
     case maps:find(From, Board0) of
         error ->
             {error, no_piece};
         {ok, Piece = {Color, _Kind}} ->
-            case maps:get(<<"turn">>, State) of
+            case maps:get(turn, State) of
                 Color ->
                     Moves = legal_moves_with_specials(State, From),
                     case lists:member(To, Moves) of
@@ -262,31 +290,30 @@ move(State, From, To, PromoteFun) ->
                                         SimStateAfterMove, From
                                     ),
                                     State2 = maps:put(
-                                        <<"board">>, SimBoard, State1
+                                        board, SimBoard, State1
                                     ),
                                     State3 = maps:put(
-                                        <<"turn">>, other(Color), State2
+                                        turn, other(Color), State2
                                     ),
                                     State4 = maps:put(
-                                        <<"halfmove">>,
-                                        maps:get(<<"halfmove">>, State1) + 1,
+                                        halfmove,
+                                        maps:get(halfmove, State1) + 1,
                                         State3
                                     ),
                                     State5 =
                                         case Color of
                                             black ->
                                                 maps:put(
-                                                    <<"fullmove">>,
+                                                    fullmove,
                                                     maps:get(
-                                                        <<"fullmove">>, State1
+                                                        fullmove, State1
                                                     ) + 1,
                                                     State4
                                                 );
                                             _ ->
                                                 State4
                                         end,
-                                    State6 = update_ep(State5, From, To, Piece),
-                                    State6
+                                    update_ep(State5, From, To, Piece)
                             end
                     end;
                 _ ->
@@ -315,16 +342,15 @@ move(State, From, To, PromoteFun) ->
 %% @param From Square to get moves for, as `{File, Rank}' tuple
 %% @returns List of legal target squares as `{File, Rank}' tuples
 %% @see legal_moves/2
--spec legal_moves_with_specials(map(), {integer(), integer()}) ->
-    [{integer(), integer()}].
+-spec legal_moves_with_specials(t(), cell()) -> [cell()].
 legal_moves_with_specials(State, From) ->
-    Board = maps:get(<<"board">>, State),
+    Board = maps:get(board, State),
     case maps:get(From, Board, none) of
         none ->
             [];
         {Color, Kind} ->
             Normal = legal_moves(Board, From),
-            EP = maps:get(<<"ep">>, State, none),
+            EP = maps:get(ep, State, none),
             EpMoves =
                 case {Kind, EP} of
                     {pawn, {Ef, Er}} when abs(Ef - element(1, From)) =:= 1 ->
@@ -356,7 +382,7 @@ legal_moves_with_specials(State, From) ->
 %% @param Square Position to get moves for, as `{File, Rank}' tuple
 %% @returns List of legal target squares as `{File, Rank}' tuples
 %% @see legal_moves_with_specials/2
--spec legal_moves(map(), {integer(), integer()}) -> [{integer(), integer()}].
+-spec legal_moves(t(), cell()) -> [cell()].
 legal_moves(Board, {F, R}) ->
     case maps:get({F, R}, Board, none) of
         none ->
@@ -506,9 +532,9 @@ slide_dir(Board, {F, R}, Color, {Df, Dr}) ->
 %% -------------------------
 
 castle_moves(State, Color) ->
-    Castling = maps:get(<<"castling">>, State),
-    Board = maps:get(<<"board">>, State),
-    Turn = maps:get(<<"turn">>, State),
+    Castling = maps:get(castling, State),
+    Board = maps:get(board, State),
+    Turn = maps:get(turn, State),
     %% king starting pos depends on color (standard)
     case Color of
         white ->
@@ -665,28 +691,28 @@ do_castle_board(Board, Color, queenside) ->
 %% -------------------------
 
 simulate_apply_move(State, From, To, {Color, Kind}, PromoteFun) ->
-    Board0 = maps:get(<<"board">>, State),
-    EP = maps:get(<<"ep">>, State, none),
+    Board0 = maps:get(board, State),
+    EP = maps:get(ep, State, none),
     case {Kind, From, To} of
         {king, {5, 1}, {7, 1}} ->
             {
                 do_castle_board(Board0, white, kingside),
-                maps:put(<<"ep">>, none, State)
+                maps:put(ep, none, State)
             };
         {king, {5, 1}, {3, 1}} ->
             {
                 do_castle_board(Board0, white, queenside),
-                maps:put(<<"ep">>, none, State)
+                maps:put(ep, none, State)
             };
         {king, {5, 8}, {7, 8}} ->
             {
                 do_castle_board(Board0, black, kingside),
-                maps:put(<<"ep">>, none, State)
+                maps:put(ep, none, State)
             };
         {king, {5, 8}, {3, 8}} ->
             {
                 do_castle_board(Board0, black, queenside),
-                maps:put(<<"ep">>, none, State)
+                maps:put(ep, none, State)
             };
         _ ->
             case {Kind, EP} of
@@ -702,14 +728,14 @@ simulate_apply_move(State, From, To, {Color, Kind}, PromoteFun) ->
                     B3 = maps:put(To, {Color, pawn}, B2),
                     {
                         maybe_promote(B3, To, Color, PromoteFun),
-                        maps:put(<<"ep">>, none, State)
+                        maps:put(ep, none, State)
                     };
                 _ ->
                     B1 = maps:remove(From, Board0),
                     B2 = maps:put(To, {Color, Kind}, B1),
                     {
                         maybe_promote(B2, To, Color, PromoteFun),
-                        maps:put(<<"ep">>, none, State)
+                        maps:put(ep, none, State)
                     }
             end
     end.
@@ -740,9 +766,9 @@ safe_promotion(Color, Fun) ->
 
 update_ep(State, {Fx, Fy}, {_Tx, Ty}, {Color, Kind}) ->
     case {Kind, Color, Fy, Ty} of
-        {pawn, white, 2, 4} -> maps:put(<<"ep">>, {Fx, 3}, State);
-        {pawn, black, 7, 5} -> maps:put(<<"ep">>, {Fx, 6}, State);
-        _ -> maps:put(<<"ep">>, none, State)
+        {pawn, white, 2, 4} -> maps:put(ep, {Fx, 3}, State);
+        {pawn, black, 7, 5} -> maps:put(ep, {Fx, 6}, State);
+        _ -> maps:put(ep, none, State)
     end.
 
 %% -------------------------
@@ -750,8 +776,8 @@ update_ep(State, {Fx, Fy}, {_Tx, Ty}, {Color, Kind}) ->
 %% -------------------------
 
 update_castling_rights(State, From) ->
-    Board = maps:get(<<"board">>, State),
-    Castling = maps:get(<<"castling">>, State),
+    Board = maps:get(board, State),
+    Castling = maps:get(castling, State),
     NewCastling =
         case maps:get(From, Board, none) of
             {white, king} ->
@@ -785,7 +811,7 @@ update_castling_rights(State, From) ->
             _ ->
                 Castling
         end,
-    maps:put(<<"castling">>, NewCastling, State).
+    maps:put(castling, NewCastling, State).
 
 put_in_castling(C, Color, Side, Val) ->
     Inner = maps:get(Color, C),
@@ -822,7 +848,7 @@ parse_castling(Str) ->
 %% @param Board The board state (piece positions only)
 %% @param Color The color of the king to check (`white' or `black')
 %% @returns `true' if the king is in check, `false' otherwise
--spec in_check(map(), white | black) -> boolean().
+-spec in_check(board(), color()) -> boolean().
 in_check(Board, Color) ->
     %% find king pos
     KingPos = find_king(Board, Color),
@@ -846,10 +872,10 @@ in_check(Board, Color) ->
 %%
 %% @param State The current chess board state
 %% @returns `true' if the current player is checkmated, `false' otherwise
--spec is_checkmate(map()) -> boolean().
+-spec is_checkmate(t()) -> boolean().
 is_checkmate(State) ->
-    Board = maps:get(<<"board">>, State),
-    Turn = maps:get(<<"turn">>, State),
+    Board = maps:get(board, State),
+    Turn = maps:get(turn, State),
     in_check(Board, Turn) andalso not has_any_legal_move(State).
 
 %% @doc Determines if the current position is stalemate.
@@ -866,10 +892,10 @@ is_checkmate(State) ->
 %%
 %% @param State The current chess board state
 %% @returns `true' if the current player is stalemated, `false' otherwise
--spec is_stalemate(map()) -> boolean().
+-spec is_stalemate(t()) -> boolean().
 is_stalemate(State) ->
-    Board = maps:get(<<"board">>, State),
-    Turn = maps:get(<<"turn">>, State),
+    Board = maps:get(board, State),
+    Turn = maps:get(turn, State),
     (not in_check(Board, Turn)) andalso not has_any_legal_move(State).
 
 %% @doc Determines if the game is over (checkmate or stalemate).
@@ -879,11 +905,11 @@ is_stalemate(State) ->
 %% @param State The current chess board state
 %% @returns `{checkmate, Winner}' where Winner is `white' or `black',
 %%          `stalemate' for a draw, or `ongoing' if the game continues
--spec is_game_over(map()) -> {checkmate, white | black} | stalemate | ongoing.
+-spec is_game_over(t()) -> {checkmate, color()} | stalemate | ongoing.
 is_game_over(State) ->
     case is_checkmate(State) of
         true ->
-            Turn = maps:get(<<"turn">>, State),
+            Turn = maps:get(turn, State),
             {checkmate, other(Turn)};
         false ->
             case is_stalemate(State) of
@@ -895,8 +921,8 @@ is_game_over(State) ->
 %% @private
 %% @doc Checks if the current player has any legal move available.
 has_any_legal_move(State) ->
-    Board = maps:get(<<"board">>, State),
-    Turn = maps:get(<<"turn">>, State),
+    Board = maps:get(board, State),
+    Turn = maps:get(turn, State),
 
     %% Get all pieces of the current player
     AllSquares = [{F, R} || F <- lists:seq(1, 8), R <- lists:seq(1, 8)],
@@ -1171,8 +1197,8 @@ parse_move(MoveString) ->
 %% @private
 %% @doc Finds the piece to move based on the parsed algebraic notation.
 find_piece_to_move(State, Piece, To, {FromFile, FromRank}) ->
-    Board = maps:get(<<"board">>, State),
-    Turn = maps:get(<<"turn">>, State),
+    Board = maps:get(board, State),
+    Turn = maps:get(turn, State),
     Candidates =
         maps:filter(
             fun

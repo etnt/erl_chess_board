@@ -17,33 +17,41 @@
     is_game_over/1
 ]).
 
+%% For the function that eunit introduces on compile time
+-spec test() -> _.
+
 %%--------------------------------------------------------------
 %%  Test Groups
 %%--------------------------------------------------------------
 
+-spec fen_roundtrip_test() -> _.
 fen_roundtrip_test() ->
     S0 = new(),
     F = to_fen(S0),
     S1 = from_fen(F),
     ?assertEqual(F, to_fen(S1)).
 
+-spec simple_pawn_move_test() -> _.
 simple_pawn_move_test() ->
     S0 = from_fen("8/8/8/3P4/8/8/8/8 w - - 0 1"),
     S1 = move(S0, {4, 5}, {4, 6}),
-    ?assertEqual(black, maps:get(<<"turn">>, S1)),
-    B = maps:get(<<"board">>, S1),
+    ?assertEqual(black, erl_chess_board:turn(S1)),
+    B = erl_chess_board:board(S1),
     ?assertEqual({white, pawn}, maps:get({4, 6}, B)).
 
+-spec illegal_move_test() -> _.
 illegal_move_test() ->
     S0 = from_fen("8/8/8/3P4/8/8/8/8 w - - 0 1"),
     {error, illegal_move} = move(S0, {4, 5}, {5, 7}).
 
+-spec pawn_promotion_autoqueen_test() -> _.
 pawn_promotion_autoqueen_test() ->
     S0 = from_fen("k7/7P/8/8/8/8/8/7K w - - 0 1"),
     S1 = move(S0, {8, 7}, {8, 8}),
     F = to_fen(S1),
     ?assertNotEqual(nomatch, string:prefix(F, "k6Q")).
 
+-spec pawn_promotion_callback_test() -> _.
 pawn_promotion_callback_test() ->
     Fun = fun(_Color) -> rook end,
     S0 = from_fen("k7/7P/8/8/8/8/8/7K w - - 0 1"),
@@ -51,6 +59,7 @@ pawn_promotion_callback_test() ->
     F = to_fen(S1),
     ?assertNotEqual(nomatch, string:prefix(F, "k6R")).
 
+-spec promotion_callback_fail_fallback_test() -> _.
 promotion_callback_fail_fallback_test() ->
     Bad = fun(_) -> oops end,
     S0 = from_fen("k7/7P/8/8/8/8/8/7K w - - 0 1"),
@@ -58,51 +67,57 @@ promotion_callback_fail_fallback_test() ->
     F = to_fen(S1),
     ?assertNotEqual(nomatch, string:prefix(F, "k6Q")).
 
+-spec en_passant_test() -> _.
 en_passant_test() ->
     %% White pawn double-step enables EP for black
     S0 = from_fen("8/8/8/3p4/8/8/2P5/8 w - - 0 1"),
     S1 = move(S0, {3, 2}, {3, 4}),
-    Ep = maps:get(<<"ep">>, S1),
-    ?assertEqual({3, 3}, Ep),
+    ?assertEqual({3, 3}, erl_chess_board:ep(S1)),
     %% black captures en passant
     S2 = move(S1, {4, 5}, {3, 4}),
-    B = maps:get(<<"board">>, S2),
+    B = erl_chess_board:board(S2),
     ?assertEqual({black, pawn}, maps:get({3, 4}, B)),
     ?assertEqual(none, maps:get({4, 5}, B, none)).
 
+-spec castling_kingside_white_test() -> _.
 castling_kingside_white_test() ->
     %% King and rook only
     S0 = from_fen("4k3/8/8/8/8/8/8/R3K2R w K - 0 1"),
     S1 = move(S0, {5, 1}, {7, 1}),
-    B = maps:get(<<"board">>, S1),
+    B = erl_chess_board:board(S1),
     ?assertEqual({white, king}, maps:get({7, 1}, B)),
     ?assertEqual({white, rook}, maps:get({6, 1}, B)).
 
+-spec castling_queenside_black_test() -> _.
 castling_queenside_black_test() ->
     S0 = from_fen("r3k2r/8/8/8/8/8/8/4K3 b kq - 0 1"),
     S1 = move(S0, {5, 8}, {3, 8}),
-    B = maps:get(<<"board">>, S1),
+    B = erl_chess_board:board(S1),
     ?assertEqual({black, king}, maps:get({3, 8}, B)),
     ?assertEqual({black, rook}, maps:get({4, 8}, B)).
 
+-spec in_check_simple_test() -> _.
 in_check_simple_test() ->
     %% White king on e1, black rook on e8 => white in check
     S0 = from_fen("4r3/8/8/8/8/8/8/4K3 w - - 0 1"),
-    B = maps:get(<<"board">>, S0),
+    B = erl_chess_board:board(S0),
     ?assert(erl_chess_board:in_check(B, white)).
 
+-spec in_check_false_test() -> _.
 in_check_false_test() ->
     %% White king not in check
     S0 = from_fen("4r3/8/8/8/8/8/8/3K4 w - - 0 1"),
-    B = maps:get(<<"board">>, S0),
+    B = erl_chess_board:board(S0),
     ?assertNot(erl_chess_board:in_check(B, white)).
 
+-spec illegal_due_to_self_check_test() -> _.
 illegal_due_to_self_check_test() ->
     %% Move rook away exposes check
     S0 = from_fen("4r3/8/8/8/8/8/8/R3K3 w - - 0 1"),
     {error, would_leave_king_in_check} = move(S0, {1, 1}, {1, 2}).
 
 %% Checkmate detection tests
+-spec checkmate_fools_mate_test() -> _.
 checkmate_fools_mate_test() ->
     %% Classic fool's mate position
     S0 = from_fen(
@@ -111,12 +126,14 @@ checkmate_fools_mate_test() ->
     ?assert(is_checkmate(S0)),
     ?assertEqual({checkmate, black}, is_game_over(S0)).
 
+-spec checkmate_back_rank_test() -> _.
 checkmate_back_rank_test() ->
     %% Back rank mate - rook on e1, white king trapped on g1
     S0 = from_fen("6k1/8/8/8/8/8/5PPP/4r1K1 w - - 0 1"),
     ?assert(is_checkmate(S0)),
     ?assertEqual({checkmate, black}, is_game_over(S0)).
 
+-spec checkmate_scholars_mate_test() -> _.
 checkmate_scholars_mate_test() ->
     %% Scholar's mate position
     S0 = from_fen(
@@ -125,6 +142,7 @@ checkmate_scholars_mate_test() ->
     ?assert(is_checkmate(S0)),
     ?assertEqual({checkmate, white}, is_game_over(S0)).
 
+-spec checkmate_from_user_example_test() -> _.
 checkmate_from_user_example_test() ->
     %% The checkmate position from the user's example
     S0 = from_fen(
@@ -133,18 +151,21 @@ checkmate_from_user_example_test() ->
     ?assert(is_checkmate(S0)),
     ?assertEqual({checkmate, white}, is_game_over(S0)).
 
+-spec not_checkmate_in_check_can_escape_test() -> _.
 not_checkmate_in_check_can_escape_test() ->
     %% King in check but can move
     S0 = from_fen("4r3/8/8/8/8/8/8/4K3 w - - 0 1"),
     ?assertNot(is_checkmate(S0)),
     ?assertEqual(ongoing, is_game_over(S0)).
 
+-spec not_checkmate_can_block_test() -> _.
 not_checkmate_can_block_test() ->
     %% King in check but can be blocked
     S0 = from_fen("4r3/8/8/8/8/4B3/8/4K3 w - - 0 1"),
     ?assertNot(is_checkmate(S0)),
     ?assertEqual(ongoing, is_game_over(S0)).
 
+-spec not_checkmate_can_capture_test() -> _.
 not_checkmate_can_capture_test() ->
     %% King in check but can capture attacking piece
     S0 = from_fen("8/8/8/8/8/8/4r3/4K3 w - - 0 1"),
@@ -152,18 +173,21 @@ not_checkmate_can_capture_test() ->
     ?assertEqual(ongoing, is_game_over(S0)).
 
 %% Stalemate detection tests
+-spec stalemate_king_only_test() -> _.
 stalemate_king_only_test() ->
     %% Classic stalemate - queen on c7, white king on c6, black king on a8
     S0 = from_fen("k7/2Q5/2K5/8/8/8/8/8 b - - 0 1"),
     ?assert(is_stalemate(S0)),
     ?assertEqual(stalemate, is_game_over(S0)).
 
+-spec stalemate_pawn_blocked_test() -> _.
 stalemate_pawn_blocked_test() ->
     %% King and pawn, both blocked
     S0 = from_fen("k7/P7/K7/8/8/8/8/8 b - - 0 1"),
     ?assert(is_stalemate(S0)),
     ?assertEqual(stalemate, is_game_over(S0)).
 
+-spec not_stalemate_has_moves_test() -> _.
 not_stalemate_has_moves_test() ->
     %% Similar position but black has legal moves
     S0 = from_fen("k7/8/1K6/8/8/8/8/8 b - - 0 1"),
@@ -171,6 +195,7 @@ not_stalemate_has_moves_test() ->
     ?assertEqual(ongoing, is_game_over(S0)).
 
 %% Game status ongoing tests
+-spec game_ongoing_opening_test() -> _.
 game_ongoing_opening_test() ->
     %% Normal opening position
     S0 = new(),
@@ -178,6 +203,7 @@ game_ongoing_opening_test() ->
     ?assertNot(is_checkmate(S0)),
     ?assertNot(is_stalemate(S0)).
 
+-spec game_ongoing_middlegame_test() -> _.
 game_ongoing_middlegame_test() ->
     %% Random middlegame position
     S0 = from_fen(
@@ -188,6 +214,7 @@ game_ongoing_middlegame_test() ->
     ?assertNot(is_stalemate(S0)).
 
 %% gather all tests in a suite
+-spec all_test_() -> [{string(), fun(() -> _)}].
 all_test_() ->
     [
         {"FEN roundtrip", fun fen_roundtrip_test/0},
